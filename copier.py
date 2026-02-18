@@ -92,10 +92,12 @@ class TradeCopier:
         logger.info(f"SDK initialised  | signer={self._account.address}")
         logger.info(f"Trading account  | address={self.query_address}")
 
-        # Load universe metadata (size decimals per coin)
+        # Load universe metadata (size decimals and tick sizes per coin)
         meta = self.info.meta()
         for asset in meta.get("universe", []):
-            self._sz_decimals[asset["name"]] = asset.get("szDecimals", 5)
+            name = asset["name"]
+            self._sz_decimals[name] = asset.get("szDecimals", 5)
+
         logger.info(f"Loaded metadata for {len(self._sz_decimals)} perps")
 
         # Set leverage for each coin we plan to copy
@@ -241,8 +243,9 @@ class TradeCopier:
 
         # ── Calculate aggressive IOC price ─────────────────────────
         slip = self.config.slippage_bps / 10_000
-        limit_px = mid * (1 + slip) if is_buy else mid * (1 - slip)
-        limit_px = round(limit_px, 1)
+        raw_px = mid * (1 + slip) if is_buy else mid * (1 - slip)
+        tick = self._tick_for_price(raw_px)
+        limit_px = round(raw_px / tick) * tick
 
         # ── Dry-run shortcut ───────────────────────────────────────
         if dry_run:
@@ -307,6 +310,19 @@ class TradeCopier:
             return TradeResult(False, coin, side, abs_size, error=str(e))
 
     # ── Internal helpers ───────────────────────────────────────────
+
+    @staticmethod
+    def _tick_for_price(price: float) -> float:
+        """
+        HyperLiquid prices use 5 significant figures.
+        Tick size = 10^(magnitude - 4) where magnitude = floor(log10(price)).
+        E.g. BTC ~$66,000 → tick=$1, ETH ~$2,000 → tick=$0.1
+        """
+        import math
+        if price <= 0:
+            return 0.01
+        magnitude = math.floor(math.log10(price))
+        return 10 ** (magnitude - 4)
 
     def _set_leverage(self, coin: str) -> None:
         """Set leverage for a coin. Failures are non-fatal."""
