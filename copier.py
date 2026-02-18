@@ -260,11 +260,8 @@ class TradeCopier:
 
         try:
             result = self.exchange.order(
-                coin=coin,
-                is_buy=is_buy,
-                sz=abs_size,
-                limit_px=limit_px,
-                order_type={"limit": {"tif": "Ioc"}},
+                coin, is_buy, abs_size, limit_px,
+                {"limit": {"tif": "Ioc"}},
                 reduce_only=False,
             )
 
