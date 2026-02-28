@@ -28,9 +28,9 @@ class CopyBot:
     Main copy-trading controller.
 
     Lifecycle:
-        1. setup()        – initialise SDK, load metadata, set leverage
-        2. startup_sync() – optionally match target's current position
-        3. run()          – async poll loop (runs until stopped)
+        1. setup()        - initialise SDK, load metadata, set leverage
+        2. startup_sync() - optionally match target's current position
+        3. run()          - async poll loop (runs until stopped)
     """
 
     def __init__(self, config: CopyBotConfig):
@@ -42,7 +42,7 @@ class CopyBot:
         self.start_time: float = 0.0
         self.trades_executed: int = 0
 
-    # ── Lifecycle ──────────────────────────────────────────────────
+    # -- Lifecycle --------------------------------------------------
 
     def setup(self) -> None:
         """Initialise the copier (SDK, leverage, metadata)."""
@@ -68,7 +68,7 @@ class CopyBot:
         filtered = self._filter_coins(target_positions)
 
         if not filtered:
-            logger.info("Target has no matching positions — starting clean")
+            logger.info("Target has no matching positions - starting clean")
             self.tracker.seed({})
             return
 
@@ -82,7 +82,7 @@ class CopyBot:
             )
 
         if self.config.sync_on_startup:
-            logger.info("sync_on_startup=True — matching target positions now")
+            logger.info("sync_on_startup=True - matching target positions now")
 
             our_positions = self.copier.get_our_positions()
 
@@ -119,15 +119,15 @@ class CopyBot:
                 if result and result.success:
                     self.trades_executed += 1
         else:
-            logger.info("sync_on_startup=False — recording target state, waiting for changes")
+            logger.info("sync_on_startup=False - recording target state, waiting for changes")
 
         # Seed the tracker so the first poll-diff cycle is clean
         self.tracker.seed(target_positions)
 
-    # ── Main loop ──────────────────────────────────────────────────
+    # -- Main loop --------------------------------------------------
 
     async def run(self) -> None:
-        """Async polling loop — runs until self.running is set to False."""
+        """Async polling loop - runs until self.running is set to False."""
         self.running = True
         self.start_time = time.time()
 
@@ -143,14 +143,14 @@ class CopyBot:
 
         while self.running:
             try:
-                # ── 1. Poll target ─────────────────────────────────
+                # -- 1. Poll target ---------------------------------
                 target_positions = self.tracker.poll()
                 filtered = self._filter_coins(target_positions)
 
-                # ── 2. Diff ────────────────────────────────────────
+                # -- 2. Diff ----------------------------------------
                 changes = self.tracker.diff(filtered, self.config.coins_to_copy)
 
-                # ── 3. React to changes ────────────────────────────
+                # -- 3. React to changes ----------------------------
                 for change in changes:
                     logger.warning(f"TARGET MOVED: {change}")
 
@@ -158,7 +158,7 @@ class CopyBot:
                         change, self.tracker.target_equity,
                     )
                     if abs(scaled) < 1e-10:
-                        logger.info(f"  Scaled delta is zero — skipping")
+                        logger.info(f"  Scaled delta is zero - skipping")
                         continue
 
                     side = "BUY" if scaled > 0 else "SELL"
@@ -173,13 +173,13 @@ class CopyBot:
                     if result and result.success:
                         self.trades_executed += 1
 
-                # ── 4. Heartbeat ───────────────────────────────────
+                # -- 4. Heartbeat -----------------------------------
                 now = time.time()
                 if now - last_heartbeat >= heartbeat_interval:
                     self._heartbeat(filtered)
                     last_heartbeat = now
 
-                # ── 5. Sleep ───────────────────────────────────────
+                # -- 5. Sleep ---------------------------------------
                 await asyncio.sleep(self.config.poll_interval_seconds)
 
             except Exception as e:
@@ -194,7 +194,7 @@ class CopyBot:
         self._print_summary()
         logger.info("Copy bot stopped.")
 
-    # ── Helpers ────────────────────────────────────────────────────
+    # -- Helpers ----------------------------------------------------
 
     def _filter_coins(self, positions: dict) -> dict:
         """Keep only the coins we're configured to copy."""
@@ -260,14 +260,14 @@ class CopyBot:
         print(f"{'=' * 60}\n")
 
 
-# ── Entry point ────────────────────────────────────────────────────
+# -- Entry point ----------------------------------------------------
 
 async def main():
     """Top-level entry: load config, wire up signals, run bot."""
 
     cfg = load_config()
 
-    # ── Logging ────────────────────────────────────────────────────
+    # -- Logging ----------------------------------------------------
     bot_dir = Path(__file__).parent
     log_dir = bot_dir / "logs"
     log_dir.mkdir(exist_ok=True)
@@ -289,13 +289,13 @@ async def main():
         level="DEBUG",
     )
 
-    # ── Banner ─────────────────────────────────────────────────────
+    # -- Banner -----------------------------------------------------
     mode_label = "DRY RUN" if cfg.dry_run else "LIVE TRADING"
     print(f"""
-    ╔══════════════════════════════════════════════════════╗
-    ║         HYPERLIQUID COPY TRADING BOT                ║
-    ║         Mode: {mode_label: <39}║
-    ╚══════════════════════════════════════════════════════╝
+    +======================================================+
+    |         HYPERLIQUID COPY TRADING BOT                |
+    |         Mode: {mode_label: <39}|
+    +======================================================+
     """)
 
     logger.info(f"Target:    {cfg.target_address}")
@@ -306,12 +306,12 @@ async def main():
     logger.info(f"Slippage:  {cfg.slippage_bps} bps")
     logger.info(f"Dry run:   {cfg.dry_run}")
 
-    # ── Build bot ──────────────────────────────────────────────────
+    # -- Build bot --------------------------------------------------
     bot = CopyBot(cfg)
 
-    # ── Graceful shutdown ──────────────────────────────────────────
+    # -- Graceful shutdown ------------------------------------------
     def handle_signal(sig, _frame):
-        logger.info(f"Signal {sig} received — shutting down")
+        logger.info(f"Signal {sig} received - shutting down")
         bot.stop()
 
     signal.signal(signal.SIGINT, handle_signal)

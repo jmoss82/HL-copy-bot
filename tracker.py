@@ -58,7 +58,7 @@ class PositionTracker:
         self._last_poll_time: float = 0.0
         self._consecutive_errors: int = 0
 
-    # ── Public API ─────────────────────────────────────────────────
+    # -- Public API -------------------------------------------------
 
     def poll(self) -> Dict[str, dict]:
         """
@@ -81,7 +81,7 @@ class PositionTracker:
                 f"Failed to poll target wallet (attempt {self._consecutive_errors}): {e}"
             )
             if self._consecutive_errors >= 5:
-                logger.critical("5 consecutive poll failures — check network / API")
+                logger.critical("5 consecutive poll failures - check network / API")
             return self._last_positions  # return stale data so diff produces no changes
 
         self._consecutive_errors = 0
@@ -169,7 +169,7 @@ class PositionTracker:
         self._last_positions = positions
         logger.info(f"Tracker seeded with {len(positions)} position(s)")
 
-    # ── Properties ─────────────────────────────────────────────────
+    # -- Properties -------------------------------------------------
 
     @property
     def target_equity(self) -> float:
@@ -179,7 +179,7 @@ class PositionTracker:
     def last_positions(self) -> Dict[str, dict]:
         return dict(self._last_positions)
 
-    # ── Helpers ────────────────────────────────────────────────────
+    # -- Helpers ----------------------------------------------------
 
     @staticmethod
     def _classify(old_size: float, new_size: float) -> str:
