@@ -52,6 +52,7 @@ class CopyBotConfig:
 
     # -- Polling ----------------------------------------------------
     poll_interval_seconds: float = 3.0
+    reconcile_mode: str = "state"  # "state" (recommended) or "delta"
 
     # -- Execution --------------------------------------------------
     slippage_bps: float = 10.0        # max slippage for IOC limit orders
@@ -90,6 +91,7 @@ def load_config() -> CopyBotConfig:
         leverage=int(os.getenv("COPY_LEVERAGE", "40")),
         is_cross=os.getenv("COPY_IS_CROSS", "false").lower() == "true",
         poll_interval_seconds=float(os.getenv("COPY_POLL_INTERVAL", "3.0")),
+        reconcile_mode=os.getenv("COPY_RECONCILE_MODE", "state").lower(),
         slippage_bps=float(os.getenv("COPY_SLIPPAGE_BPS", "10.0")),
         min_trade_size_usd=float(os.getenv("COPY_MIN_TRADE_USD", "11.0")),
         coins_to_copy=os.getenv("COPY_COINS", "BTC").split(","),
@@ -116,3 +118,5 @@ def validate_config(cfg: CopyBotConfig) -> None:
         raise ValueError(f"Invalid wallet address: {cfg.wallet_address}")
     if not cfg.private_key.startswith("0x") or len(cfg.private_key) != 66:
         raise ValueError("Invalid private key format")
+    if cfg.reconcile_mode not in {"state", "delta"}:
+        raise ValueError("COPY_RECONCILE_MODE must be 'state' or 'delta'")

@@ -5,8 +5,8 @@ Monitors a target trader's perp positions on HyperLiquid in real-time and mirror
 ## How It Works
 
 1. **Poll** the target wallet every 3 seconds via the public `/info` API (no auth needed)
-2. **Diff** their positions against the last snapshot to detect opens, closes, increases, decreases, and flips
-3. **Scale** the detected change according to your configured sizing mode
+2. **Compute desired position** for your account based on configured sizing
+3. **Reconcile gap** between desired and your actual position each poll (state mode)
 4. **Execute** an IOC limit order through the spread on your account (prices rounded to HL's 5 significant figure rule)
 
 ## Files
@@ -56,6 +56,7 @@ cp .env.example .env
 | `COPY_LEVERAGE` | `40` | Your leverage |
 | `COPY_IS_CROSS` | `false` | `true` for cross margin, `false` for isolated |
 | `COPY_POLL_INTERVAL` | `3.0` | Seconds between target polls |
+| `COPY_RECONCILE_MODE` | `state` | `state` (recommended) or `delta` |
 | `COPY_SLIPPAGE_BPS` | `10.0` | Max slippage for IOC orders (basis points) |
 | `COPY_MIN_TRADE_USD` | `11.0` | Skip trades below this notional |
 | `COPY_MAX_POSITION_USD` | `5000` | Hard cap on resulting position exposure |
@@ -108,6 +109,11 @@ COPY_SYNC_STARTUP=true
 - `COPY_MAX_TRADE_USD` caps a single mirrored order's notional (optional).
 - `COPY_MAX_POSITION_USD` caps resulting position exposure after each trade.
 - `COPY_MIN_TRADE_USD` filters out tiny orders below exchange minimum notional.
+
+## Reconciliation Modes
+
+- `state` (recommended): each poll computes desired position and trades `desired - current`.
+- `delta`: legacy mode, mirrors only detected position deltas between polls.
 
 ## Going Live Checklist
 

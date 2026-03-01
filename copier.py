@@ -149,6 +149,42 @@ class TradeCopier:
 
     # -- Scaling ----------------------------------------------------
 
+    def target_position_to_desired_size(
+        self,
+        coin: str,
+        target_size: float,
+        target_equity: float,
+    ) -> float:
+        """
+        Convert target's absolute position into our desired absolute position.
+
+        Returns signed size (positive long, negative short).
+        """
+        if abs(target_size) < 1e-10:
+            return 0.0
+
+        if self.config.scaling_mode == "proportional":
+            our_eq = self.get_our_equity()
+            ratio = (our_eq / target_equity) if target_equity > 0 else 0
+            desired = target_size * ratio
+        elif self.config.scaling_mode == "fixed_ratio":
+            desired = target_size * self.config.fixed_ratio
+        elif self.config.scaling_mode == "fixed_size":
+            desired = self.config.fixed_size * (1.0 if target_size > 0 else -1.0)
+        elif self.config.scaling_mode == "fixed_notional":
+            mid = self.get_mid_price(coin)
+            if mid <= 0:
+                logger.error(f"No price data for {coin}, cannot compute desired size")
+                return 0.0
+            desired = (self.config.fixed_notional_usd / mid) * (
+                1.0 if target_size > 0 else -1.0
+            )
+        else:
+            logger.error(f"Unknown scaling mode: {self.config.scaling_mode}")
+            return 0.0
+
+        return desired
+
     def scale_delta(
         self,
         change: PositionChange,

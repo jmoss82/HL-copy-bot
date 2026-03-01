@@ -90,20 +90,9 @@ class CopyBot:
                 target_size = data["size"]
                 our_size = our_positions.get(coin, 0.0)
 
-                # Build a synthetic PositionChange to use the normal scaling path
-                from tracker import PositionChange
-                change = PositionChange(
-                    coin=coin,
-                    old_size=0.0,
-                    new_size=target_size,
-                    delta=target_size,
-                    action="OPEN",
-                    target_entry_px=data["entry_px"],
-                    target_leverage=data["leverage"],
-                    timestamp=time.time(),
+                needed = self.copier.target_position_to_desired_size(
+                    coin, target_size, self.tracker.target_equity
                 )
-
-                needed = self.copier.scale_delta(change, self.tracker.target_equity)
                 already = our_size
                 gap = needed - already
 
@@ -148,30 +137,60 @@ class CopyBot:
                 filtered = self._filter_coins(target_positions)
 
                 # -- 2. Diff ----------------------------------------
-                changes = self.tracker.diff(filtered, self.config.coins_to_copy)
+                if self.config.reconcile_mode == "delta":
+                    changes = self.tracker.diff(filtered, self.config.coins_to_copy)
 
-                # -- 3. React to changes ----------------------------
-                for change in changes:
-                    logger.warning(f"TARGET MOVED: {change}")
+                    # -- 3. React to changes ------------------------
+                    for change in changes:
+                        logger.warning(f"TARGET MOVED: {change}")
 
-                    scaled = self.copier.scale_delta(
-                        change, self.tracker.target_equity,
-                    )
-                    if abs(scaled) < 1e-10:
-                        logger.info(f"  Scaled delta is zero - skipping")
-                        continue
+                        scaled = self.copier.scale_delta(
+                            change, self.tracker.target_equity,
+                        )
+                        if abs(scaled) < 1e-10:
+                            logger.info("  Scaled delta is zero - skipping")
+                            continue
 
-                    side = "BUY" if scaled > 0 else "SELL"
-                    logger.info(
-                        f"  Mirroring: {side} {abs(scaled):.6f} {change.coin} "
-                        f"(scaling={self.config.scaling_mode})"
-                    )
+                        side = "BUY" if scaled > 0 else "SELL"
+                        logger.info(
+                            f"  Mirroring: {side} {abs(scaled):.6f} {change.coin} "
+                            f"(scaling={self.config.scaling_mode})"
+                        )
 
-                    result = self.copier.execute(
-                        change.coin, scaled, dry_run=self.config.dry_run,
-                    )
-                    if result and result.success:
-                        self.trades_executed += 1
+                        result = self.copier.execute(
+                            change.coin, scaled, dry_run=self.config.dry_run,
+                        )
+                        if result and result.success:
+                            self.trades_executed += 1
+                else:
+                    # State-based reconciliation: each poll aims for target alignment.
+                    self.tracker.seed(filtered)
+                    our_positions = self.copier.get_our_positions()
+                    for coin in self._coins_to_reconcile(filtered, our_positions):
+                        target_size = filtered.get(coin, {}).get("size", 0.0)
+                        desired_size = self.copier.target_position_to_desired_size(
+                            coin, target_size, self.tracker.target_equity
+                        )
+                        current_size = our_positions.get(coin, 0.0)
+                        delta = desired_size - current_size
+
+                        if abs(delta) < 1e-10:
+                            continue
+
+                        side = "BUY" if delta > 0 else "SELL"
+                        logger.warning(
+                            f"REBALANCE {coin}: target={target_size:+.6f}, "
+                            f"desired={desired_size:+.6f}, ours={current_size:+.6f}"
+                        )
+                        logger.info(
+                            f"  Mirroring: {side} {abs(delta):.6f} {coin} "
+                            f"(mode={self.config.reconcile_mode}, scaling={self.config.scaling_mode})"
+                        )
+                        result = self.copier.execute(
+                            coin, delta, dry_run=self.config.dry_run,
+                        )
+                        if result and result.success:
+                            self.trades_executed += 1
 
                 # -- 4. Heartbeat -----------------------------------
                 now = time.time()
@@ -235,6 +254,12 @@ class CopyBot:
                 parts.append(f"Ours {coin}: flat")
 
         logger.info("HEARTBEAT | " + " | ".join(parts))
+
+    def _coins_to_reconcile(self, target_positions: dict, our_positions: dict) -> list:
+        """Return the coin list to reconcile when running in state mode."""
+        if "*" in self.config.coins_to_copy:
+            return sorted(set(target_positions.keys()) | set(our_positions.keys()))
+        return [coin for coin in self.config.coins_to_copy if coin != "*"]
 
     def _print_summary(self) -> None:
         """Print a final status block on shutdown."""
@@ -300,7 +325,16 @@ async def main():
 
     logger.info(f"Target:    {cfg.target_address}")
     logger.info(f"Coins:     {cfg.coins_to_copy}")
-    logger.info(f"Scaling:   {cfg.scaling_mode} (ratio={cfg.fixed_ratio})")
+    if cfg.scaling_mode == "fixed_ratio":
+        scaling_detail = f"ratio={cfg.fixed_ratio}"
+    elif cfg.scaling_mode == "fixed_size":
+        scaling_detail = f"size={cfg.fixed_size}"
+    elif cfg.scaling_mode == "fixed_notional":
+        scaling_detail = f"notional=${cfg.fixed_notional_usd}"
+    else:
+        scaling_detail = "equity-proportional"
+    logger.info(f"Scaling:   {cfg.scaling_mode} ({scaling_detail})")
+    logger.info(f"Copy mode: {cfg.reconcile_mode}")
     logger.info(f"Leverage:  {cfg.leverage}x ({'cross' if cfg.is_cross else 'isolated'})")
     logger.info(f"Polling:   every {cfg.poll_interval_seconds}s")
     logger.info(f"Slippage:  {cfg.slippage_bps} bps")
