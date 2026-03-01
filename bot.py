@@ -37,6 +37,7 @@ class CopyBot:
         self.config = config
         self.tracker = PositionTracker(config.target_address)
         self.copier = TradeCopier(config)
+        self._sim_positions: dict = {}
 
         self.running = False
         self.start_time: float = 0.0
@@ -49,6 +50,7 @@ class CopyBot:
         logger.info("Initialising copy bot...")
         validate_config(self.config)
         self.copier.setup()
+        self._sim_positions = self.copier.get_our_positions()
 
         our_equity = self.copier.get_our_equity(force=True)
         logger.info(f"Your account equity: ${our_equity:,.2f}")
@@ -106,6 +108,7 @@ class CopyBot:
                 )
                 result = self.copier.execute(coin, gap, dry_run=self.config.dry_run)
                 if result and result.success:
+                    self._record_position_change(coin, gap)
                     self.trades_executed += 1
         else:
             logger.info("sync_on_startup=False - recording target state, waiting for changes")
@@ -161,11 +164,12 @@ class CopyBot:
                             change.coin, scaled, dry_run=self.config.dry_run,
                         )
                         if result and result.success:
+                            self._record_position_change(change.coin, scaled)
                             self.trades_executed += 1
                 else:
                     # State-based reconciliation: each poll aims for target alignment.
                     self.tracker.seed(filtered)
-                    our_positions = self.copier.get_our_positions()
+                    our_positions = self._effective_positions()
                     for coin in self._coins_to_reconcile(filtered, our_positions):
                         target_size = filtered.get(coin, {}).get("size", 0.0)
                         desired_size = self.copier.target_position_to_desired_size(
@@ -190,6 +194,7 @@ class CopyBot:
                             coin, delta, dry_run=self.config.dry_run,
                         )
                         if result and result.success:
+                            self._record_position_change(coin, delta)
                             self.trades_executed += 1
 
                 # -- 4. Heartbeat -----------------------------------
@@ -242,7 +247,7 @@ class CopyBot:
             parts.append(f"Target {coin}: {side}{abs(size):.4f}")
 
         # Our position summary
-        our = self.copier.get_our_positions()
+        our = self._effective_positions()
         for coin in self.config.coins_to_copy:
             if coin == "*":
                 continue
@@ -260,6 +265,20 @@ class CopyBot:
         if "*" in self.config.coins_to_copy:
             return sorted(set(target_positions.keys()) | set(our_positions.keys()))
         return [coin for coin in self.config.coins_to_copy if coin != "*"]
+
+    def _effective_positions(self) -> dict:
+        """Use simulated positions in dry-run so reconciliation converges in tests."""
+        if self.config.dry_run:
+            return dict(self._sim_positions)
+        return self.copier.get_our_positions()
+
+    def _record_position_change(self, coin: str, delta: float) -> None:
+        """Track synthetic position changes when dry-run mode is active."""
+        if not self.config.dry_run:
+            return
+        self._sim_positions[coin] = self._sim_positions.get(coin, 0.0) + delta
+        if abs(self._sim_positions[coin]) < 1e-10:
+            self._sim_positions.pop(coin, None)
 
     def _print_summary(self) -> None:
         """Print a final status block on shutdown."""
