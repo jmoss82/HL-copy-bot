@@ -180,6 +180,13 @@ class CopyBot:
 
                         if abs(delta) < 1e-10:
                             continue
+                        mid = self.copier.get_mid_price(coin)
+                        if (
+                            mid > 0
+                            and abs(delta) * mid < self.config.min_trade_size_usd
+                        ):
+                            # Avoid perpetual tiny rebalance attempts caused by price drift.
+                            continue
 
                         side = "BUY" if delta > 0 else "SELL"
                         logger.warning(
