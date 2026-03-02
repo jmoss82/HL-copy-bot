@@ -322,15 +322,15 @@ class TradeCopier:
         # -- Dry-run shortcut ---------------------------------------
         if dry_run:
             logger.info(
-                f"[DRY RUN] {side} {abs_size} {coin} @ ~${limit_px:,.1f} "
-                f"(mid=${mid:,.1f}, notional=${notional:,.0f})"
+                f"[DRY RUN] {side} {abs_size} {coin} @ ~${self._fmt_price(limit_px)} "
+                f"(mid=${self._fmt_price(mid)}, notional=${notional:,.0f})"
             )
             return TradeResult(True, coin, side, abs_size, abs_size, mid)
 
         # -- Live execution -----------------------------------------
         logger.warning(
-            f"EXECUTING: {side} {abs_size} {coin} @ ${limit_px:,.1f} "
-            f"(mid=${mid:,.1f}, slippage={self.config.slippage_bps}bps)"
+            f"EXECUTING: {side} {abs_size} {coin} @ ${self._fmt_price(limit_px)} "
+            f"(mid=${self._fmt_price(mid)}, slippage={self.config.slippage_bps}bps)"
         )
 
         try:
@@ -395,6 +395,19 @@ class TradeCopier:
             return 0.01
         magnitude = math.floor(math.log10(price))
         return 10 ** (magnitude - 4)
+
+    @staticmethod
+    def _fmt_price(price: float) -> str:
+        """Render prices with enough precision for sub-$1 perps."""
+        if price >= 100:
+            return f"{price:,.1f}"
+        if price >= 1:
+            return f"{price:,.3f}"
+        if price >= 0.1:
+            return f"{price:,.4f}"
+        if price >= 0.01:
+            return f"{price:,.5f}"
+        return f"{price:,.6f}"
 
     def _set_leverage(self, coin: str) -> None:
         """Set leverage for a coin. Failures are non-fatal."""

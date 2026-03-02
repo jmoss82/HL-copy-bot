@@ -80,7 +80,7 @@ class CopyBot:
             side = "LONG" if size > 0 else "SHORT"
             logger.info(
                 f"  Target: {side} {abs(size):.6f} {coin} "
-                f"(entry ${data['entry_px']:,.1f}, {data['leverage']}x)"
+                f"(entry ${self._fmt_price(data['entry_px'])}, {data['leverage']}x)"
             )
 
         if self.config.sync_on_startup:
@@ -309,6 +309,19 @@ class CopyBot:
         else:
             print()
         print(f"{'=' * 60}\n")
+
+    @staticmethod
+    def _fmt_price(price: float) -> str:
+        """Render prices with enough precision for sub-$1 perps."""
+        if price >= 100:
+            return f"{price:,.1f}"
+        if price >= 1:
+            return f"{price:,.3f}"
+        if price >= 0.1:
+            return f"{price:,.4f}"
+        if price >= 0.01:
+            return f"{price:,.5f}"
+        return f"{price:,.6f}"
 
 
 # -- Entry point ----------------------------------------------------
