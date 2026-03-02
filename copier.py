@@ -376,14 +376,17 @@ class TradeCopier:
                         avg = float(fill.get("avgPx", 0))
                         tsz = float(fill.get("totalSz", 0))
                         oid = fill.get("oid", 0)
+                        # Force next reconciliation to pull fresh on-chain positions.
+                        self._positions_ts = 0.0
                         logger.success(
-                            f"FILLED: {side} {tsz} {coin} @ ${avg:,.1f} "
+                            f"FILLED: {side} {tsz} {coin} @ ${self._fmt_price(avg)} "
                             f"(oid={oid})"
                         )
                         return TradeResult(True, coin, side, abs_size, tsz, avg, oid)
 
                     if "resting" in st:
                         oid = st["resting"].get("oid", 0)
+                        self._positions_ts = 0.0
                         logger.warning(
                             f"Order resting (unexpected for IOC): oid={oid}"
                         )
