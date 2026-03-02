@@ -65,6 +65,12 @@ class TradeCopier:
         self._our_equity: float = 0.0
         self._equity_ts: float = 0.0
 
+        # Cached account state and mids to reduce API pressure
+        self._positions_cache: Dict[str, float] = {}
+        self._positions_ts: float = 0.0
+        self._mids_cache: Dict[str, float] = {}
+        self._mids_ts: float = 0.0
+
     # -- Lifecycle --------------------------------------------------
 
     def setup(self) -> None:
@@ -78,7 +84,7 @@ class TradeCopier:
             )
 
         base_url = constants.MAINNET_API_URL
-        self.info = Info(base_url, skip_ws=True)
+        self.info = self._build_info_with_retry(base_url)
 
         # Agent-wallet: if account_address differs from the signer, pass it
         acct = self.config.account_address
@@ -122,8 +128,10 @@ class TradeCopier:
             logger.error(f"Failed to fetch our equity: {e}")
         return self._our_equity
 
-    def get_our_positions(self) -> Dict[str, float]:
+    def get_our_positions(self, force: bool = False) -> Dict[str, float]:
         """Return our current positions as {coin: signed_size}."""
+        if not force and (time.time() - self._positions_ts) < 2:
+            return dict(self._positions_cache)
         try:
             state = self.info.user_state(self.query_address)
             positions: Dict[str, float] = {}
@@ -133,16 +141,31 @@ class TradeCopier:
                 size = float(pos.get("szi", 0))
                 if abs(size) > 1e-10:
                     positions[coin] = size
-            return positions
+            self._positions_cache = positions
+            self._positions_ts = time.time()
+            return dict(positions)
         except Exception as e:
             logger.error(f"Failed to fetch our positions: {e}")
-            return {}
+            return dict(self._positions_cache)
 
     def get_mid_price(self, coin: str) -> float:
         """Current mid-market price for *coin*."""
+        if (time.time() - self._mids_ts) >= 1:
+            try:
+                mids = self.info.all_mids()
+                self._mids_cache = {k: float(v) for k, v in mids.items()}
+                self._mids_ts = time.time()
+            except Exception as e:
+                logger.error(f"Failed to refresh mid prices: {e}")
+        if coin in self._mids_cache:
+            return self._mids_cache[coin]
         try:
             mids = self.info.all_mids()
-            return float(mids.get(coin, 0))
+            px = float(mids.get(coin, 0))
+            if px > 0:
+                self._mids_cache[coin] = px
+                self._mids_ts = time.time()
+            return px
         except Exception as e:
             logger.error(f"Failed to get mid price for {coin}: {e}")
             return 0.0
@@ -314,10 +337,7 @@ class TradeCopier:
             return TradeResult(False, coin, side, abs_size, error="daily limit")
 
         # -- Calculate aggressive IOC price -------------------------
-        slip = self.config.slippage_bps / 10_000
-        raw_px = mid * (1 + slip) if is_buy else mid * (1 - slip)
-        tick = self._tick_for_price(raw_px)
-        limit_px = round(raw_px / tick) * tick
+        limit_px = self._slippage_ioc_price(coin, is_buy, mid)
 
         # -- Dry-run shortcut ---------------------------------------
         if dry_run:
@@ -383,18 +403,42 @@ class TradeCopier:
 
     # -- Internal helpers -------------------------------------------
 
+    def _slippage_ioc_price(self, coin: str, is_buy: bool, mid: float) -> float:
+        """
+        Price an IOC order using HyperLiquid's perp rounding constraints:
+        5 significant figures and <= (6 - szDecimals) decimals.
+        """
+        slip = self.config.slippage_bps / 10_000
+        px = mid * (1 + slip) if is_buy else mid * (1 - slip)
+        px = float(f"{px:.5g}")
+        max_decimals = max(0, 6 - int(self._sz_decimals.get(coin, 5)))
+        return round(px, max_decimals)
+
     @staticmethod
-    def _tick_for_price(price: float) -> float:
-        """
-        HyperLiquid prices use 5 significant figures.
-        Tick size = 10^(magnitude - 4) where magnitude = floor(log10(price)).
-        E.g. BTC ~$66,000 -> tick=$1, ETH ~$2,000 -> tick=$0.1
-        """
-        import math
-        if price <= 0:
-            return 0.01
-        magnitude = math.floor(math.log10(price))
-        return 10 ** (magnitude - 4)
+    def _is_rate_limit_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return "429" in text or "too many requests" in text
+
+    def _build_info_with_retry(self, base_url: str) -> Info:
+        """Retry Info client init to survive transient 429 responses."""
+        delay = 1.0
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                return Info(base_url, skip_ws=True)
+            except Exception as e:
+                last_exc = e
+                if not self._is_rate_limit_error(e) or attempt == 3:
+                    break
+                logger.warning(
+                    f"Info init rate-limited (attempt {attempt}/3). "
+                    f"Retrying in {delay:.1f}s"
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, 4.0)
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("Info init failed without an exception")
 
     @staticmethod
     def _fmt_price(price: float) -> str:
