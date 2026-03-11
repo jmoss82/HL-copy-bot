@@ -82,7 +82,8 @@ Set `COPY_SYNC_STARTUP=true` only when recovering from a crash where the bot was
 
 - `COPY_MAX_TRADE_USD` caps a single order's notional.
 - `COPY_MAX_POSITION_USD` caps resulting position exposure after each trade.
-- `COPY_MIN_TRADE_USD` filters out orders below the exchange minimum.
+- `COPY_MIN_TRADE_USD` filters out new entries and adds below the exchange minimum.
+- Reduce-only dust exits below `COPY_MIN_TRADE_USD` are allowed so the bot can fully flatten residual positions.
 - `COPY_MAX_DAILY_TRADES` halts trading if the daily limit is hit.
 
 ## Local Development

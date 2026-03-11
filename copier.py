@@ -318,14 +318,23 @@ class TradeCopier:
         is_buy = signed_delta > 0
         side = "BUY" if is_buy else "SELL"
         abs_size = abs(signed_delta)
+        is_reduce_only = (
+            abs(current_size) > 1e-10
+            and (current_size > 0) != (signed_delta > 0)
+            and abs(signed_delta) <= abs(current_size) + 1e-10
+        )
 
         notional = abs_size * mid
-        if notional < self.config.min_trade_size_usd:
+        if notional < self.config.min_trade_size_usd and not is_reduce_only:
             logger.debug(
                 f"Trade too small: {abs_size} {coin} = ${notional:.2f} "
                 f"(min ${self.config.min_trade_size_usd})"
             )
             return None
+        if notional < self.config.min_trade_size_usd and is_reduce_only:
+            logger.info(
+                f"Allowing reduce-only dust close: {abs_size} {coin} = ${notional:.2f}"
+            )
 
         # -- Daily trade limit --------------------------------------
         now = time.time()
@@ -357,7 +366,7 @@ class TradeCopier:
             result = self.exchange.order(
                 coin, is_buy, abs_size, limit_px,
                 {"limit": {"tif": "Ioc"}},
-                reduce_only=False,
+                reduce_only=is_reduce_only,
             )
 
             self._trade_timestamps.append(now)
