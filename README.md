@@ -1,91 +1,111 @@
 # HyperLiquid Copy Trading Bot
 
-Monitors a target trader's perp positions on HyperLiquid in real-time and mirrors their trades onto your account.
+This folder contains one of the three live HyperLiquid copy-trading bots in this repository.
 
-## How It Works
+It runs independently from the other bot folders, but uses the same overall engine:
 
-1. **Poll** the target wallet every 3 seconds via the public `/info` API (no auth needed)
-2. **Open a lifecycle session** when the target goes from flat to nonzero on a copied coin
-3. **Anchor your size** using the configured sizing mode, then keep a copy ratio for that trade lifecycle
-4. **Mirror staged adds, trims, closes, and flips** as the target position evolves over time
-5. **Execute** an IOC limit order through the spread on your account (prices rounded to HL's 5 significant figure rule)
+- poll a target wallet on HyperLiquid
+- detect changes in the copied positions
+- translate those changes into your configured sizing model
+- place mirrored orders on your account through the HyperLiquid SDK
 
-## Files
+## Important Context
+
+This README is intended to explain the structure and behavior of the bot. It is not the source of truth for the exact live wallet address, coin list, or risk numbers currently deployed.
+
+The live source of truth is:
+
+1. the code in this folder
+2. the environment variables configured for this bot's deployment
+
+In other words, this bot copies one specific wallet and one specific set of coins, but those exact values are expected to come from Railway variables or a local `.env`, not from hardcoded claims in this README.
+
+## Runtime Flow
+
+1. Poll the target wallet every few seconds through HyperLiquid's public `/info` API.
+2. Filter down to the configured `COPY_COINS` universe for this bot.
+3. Compare the current snapshot to the previous snapshot.
+4. Convert the target movement into the bot's own desired size using the configured sizing mode.
+5. Execute an IOC order on your account through the HyperLiquid SDK.
+
+When `COPY_RECONCILE_MODE=lifecycle`, the bot does more than just mirror a final net position. It anchors a copy ratio when the target opens a trade, then mirrors adds, trims, closes, and flips throughout that position lifecycle.
+
+## Key Files
 
 | File | Purpose |
 |---|---|
-| `bot.py` | Main entry point, async loop, startup sync, lifecycle reconciliation, heartbeat logging |
-| `config.py` | All settings loaded from environment variables with defaults |
-| `tracker.py` | Polls target wallet, diffs positions, classifies changes |
-| `copier.py` | Executes mirrored trades on your account via the HL SDK |
+| `bot.py` | Main process, startup sync, polling loop, reconciliation, heartbeat logging |
+| `config.py` | Environment-variable loading, defaults, and validation |
+| `tracker.py` | Polls the copied wallet and detects position changes |
+| `copier.py` | Queries account state, computes sizes, sets leverage, and places orders |
+| `.env.example` | Local configuration template |
+| `requirements.txt` | Python dependencies |
+| `analyze_strategy.py` | Helper script for reviewing trading behavior |
+| `check_wallet.py` | Helper script for inspecting wallet state |
+| `recent_fills.py` | Helper script for checking recent fills |
 
-## Deployment (Railway)
+## Configuration
 
-Railway is the source of truth for all configuration. Set environment variables in the service's Variables tab — no `.env` file needed. Entry point is `python bot.py`.
+Railway is the normal source of truth in production. If running locally, create a `.env` file based on `.env.example`.
 
-**Every push to the repo triggers a redeploy on Railway, which restarts the bot.**
+The most important variables are:
 
-On restart, the bot checks what the target currently has open. Any coins the target is already in are locked — the bot waits for them to close before following the next entry. `COPY_SYNC_STARTUP=true` overrides this and immediately enters to match the target (useful if the server crashed mid-position and you need to re-sync).
-
-## Environment Variables
-
-**Required:**
-
-| Variable | Description |
+| Variable | Meaning |
 |---|---|
-| `HL_WALLET_ADDRESS` | Your signer wallet address |
-| `HL_PRIVATE_KEY` | Your private key |
-| `HL_ACCOUNT_ADDRESS` | Your trading account (agent wallet) |
-| `COPY_TARGET_ADDRESS` | Wallet address of the trader to copy |
+| `HL_WALLET_ADDRESS` | Signer wallet address |
+| `HL_PRIVATE_KEY` | Private key for signing |
+| `HL_ACCOUNT_ADDRESS` | Trading account or agent wallet |
+| `COPY_TARGET_ADDRESS` | Wallet being copied |
+| `COPY_COINS` | Coins this bot is allowed to copy |
+| `COPY_SCALING_MODE` | How copied trades are sized |
+| `COPY_RECONCILE_MODE` | `state`, `delta`, or `lifecycle` |
+| `COPY_SYNC_STARTUP` | Whether to sync into existing positions on startup |
+| `COPY_LEVERAGE` | Default leverage for all coins |
+| `COPY_LEVERAGE_OVERRIDES` | Per-coin leverage overrides (format: `HYPE:10,ZRO:3`) |
+| `COPY_DRY_RUN` | Safety switch for simulated vs live execution |
 
-**Current config:**
+### Per-Coin Leverage
 
-| Variable | Value | Description |
-|---|---|---|
-| `COPY_SCALING_MODE` | `fixed_notional` | Anchor each new lifecycle with a fixed USD amount |
-| `COPY_FIXED_NOTIONAL_USD` | `20` | USD notional used when the target opens a new lifecycle |
-| `COPY_MAX_TRADE_USD` | `40` | Per-trade notional cap |
-| `COPY_LEVERAGE` | `5` | Leverage applied to your positions |
-| `COPY_IS_CROSS` | `false` | Isolated margin |
-| `COPY_MAX_POSITION_USD` | `200` | Hard cap on resulting BTC/ETH exposure |
-| `COPY_COINS` | `BTC,ETH` | Coins copied for this wallet |
-| `COPY_SYNC_STARTUP` | `false` | Wait for next entry rather than entering existing positions |
-| `COPY_MIN_TRADE_USD` | `11` | Skip trades below this notional (HL minimum ~$10) |
-| `COPY_RECONCILE_MODE` | `lifecycle` | Mirror the target's full trade lifecycle instead of only the net state |
-| `COPY_DRY_RUN` | `false` | Live trading |
+By default, `COPY_LEVERAGE` applies to every coin. To set different leverage per coin, use `COPY_LEVERAGE_OVERRIDES`:
 
-**Other available variables (using defaults):**
+```
+COPY_LEVERAGE=5
+COPY_LEVERAGE_OVERRIDES=HYPE:10,ZRO:3
+```
 
-| Variable | Default | Description |
-|---|---|---|
-| `COPY_POLL_INTERVAL` | `3.0` | Seconds between target polls |
-| `COPY_SLIPPAGE_BPS` | `10.0` | Max slippage for IOC orders (basis points) |
-| `COPY_MAX_POSITION_USD` | `5000` | Hard cap on resulting position exposure if not overridden |
-| `COPY_MAX_DAILY_TRADES` | `200` | Kill switch if something goes wrong |
-| `COPY_LOG_LEVEL` | `INFO` | `DEBUG` for verbose output |
+In this example HYPE would use 10x, ZRO would use 3x, and every other coin would use the default 5x. If `COPY_LEVERAGE_OVERRIDES` is not set, all coins use `COPY_LEVERAGE`.
+
+Treat `.env.example` as an example template, not proof of the live production values.
 
 ## Reconcile Modes
 
-- `state`: each poll targets a global desired position on your account.
-- `delta`: trades only when the target's net position changes between snapshots.
-- `lifecycle`: anchors a copy ratio when the target opens, then mirrors staged adds, trims, closes, and flips throughout that trade's lifecycle.
+- `state`: aim for a desired net position each cycle
+- `delta`: trade only the detected net change since the last snapshot
+- `lifecycle`: anchor a copy ratio on open, then mirror the full trade lifecycle
 
-`lifecycle` is the best fit for this wallet because the trader scales in and out over time rather than using simple one-entry, one-exit roundtrips.
+## Startup Behavior
 
-## Startup Behaviour
+By default, the bot can lock coins that were already open on the target when the process starts. That prevents the bot from blindly jumping into the middle of an existing trade.
 
-By default (`COPY_SYNC_STARTUP=false`), the bot locks any coins the target already has open at startup and waits for them to close before following the next entry. In `lifecycle` mode this means the bot waits for a fresh `flat -> open` transition before anchoring a new copy ratio.
-
-Set `COPY_SYNC_STARTUP=true` only when recovering from a crash where the bot was already in a position and needs to re-sync immediately. In `lifecycle` mode this joins the target's current lifecycle using the current observed position as the anchor.
+If `COPY_SYNC_STARTUP=true`, the bot is allowed to sync into the target's already-open positions immediately. That is mainly useful for recovery after a restart or crash.
 
 ## Risk Guards
 
-- `COPY_MAX_TRADE_USD` caps a single order's notional.
-- `COPY_MAX_POSITION_USD` caps resulting position exposure after each trade.
-- `COPY_MIN_TRADE_USD` filters out new entries and adds below the exchange minimum.
-- Reduce-only dust exits below `COPY_MIN_TRADE_USD` are allowed so the bot can fully flatten residual positions.
-- `COPY_MAX_DAILY_TRADES` halts trading if the daily limit is hit.
+- `COPY_MAX_TRADE_USD` caps a single order's notional
+- `COPY_MAX_POSITION_USD` caps resulting exposure
+- `COPY_MIN_TRADE_USD` filters out trades below the exchange minimum
+- `COPY_MAX_DAILY_TRADES` acts as a kill switch if trading activity spikes unexpectedly
 
-## Local Development
+## Running
 
-If running locally, create a `.env` file based on `.env.example`. Railway variables take precedence in production and no `.env` file is needed there.
+Local entry point:
+
+```bash
+python bot.py
+```
+
+Production entry point:
+
+```bash
+python bot.py
+```

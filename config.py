@@ -6,7 +6,7 @@ Loads settings from environment variables and provides defaults.
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 from dotenv import load_dotenv
 
 # Load .env file (local only - Railway provides env vars directly)
@@ -43,6 +43,7 @@ class CopyBotConfig:
 
     # -- Leverage ---------------------------------------------------
     leverage: int = 20
+    leverage_overrides: Dict[str, int] = field(default_factory=dict)
     is_cross: bool = True
 
     # -- Polling ----------------------------------------------------
@@ -66,6 +67,28 @@ class CopyBotConfig:
     # -- Logging ----------------------------------------------------
     log_level: str = "INFO"
 
+    def leverage_for(self, coin: str) -> int:
+        """Return the leverage for a specific coin, respecting overrides."""
+        return self.leverage_overrides.get(coin, self.leverage)
+
+
+def _parse_leverage_overrides(raw: str) -> Dict[str, int]:
+    """Parse 'HYPE:10,ZRO:3' into {'HYPE': 10, 'ZRO': 3}."""
+    overrides: Dict[str, int] = {}
+    if not raw or not raw.strip():
+        return overrides
+    for pair in raw.split(","):
+        pair = pair.strip()
+        if ":" not in pair:
+            continue
+        coin, lev = pair.split(":", 1)
+        coin = coin.strip().upper()
+        try:
+            overrides[coin] = int(lev.strip())
+        except ValueError:
+            continue
+    return overrides
+
 
 def load_config() -> CopyBotConfig:
     """Build config from environment variables with sensible defaults."""
@@ -84,6 +107,9 @@ def load_config() -> CopyBotConfig:
         max_trade_usd=float(os.getenv("COPY_MAX_TRADE_USD", "0.0")),
         max_position_usd=float(os.getenv("COPY_MAX_POSITION_USD", "5000")),
         leverage=int(os.getenv("COPY_LEVERAGE", "40")),
+        leverage_overrides=_parse_leverage_overrides(
+            os.getenv("COPY_LEVERAGE_OVERRIDES", "")
+        ),
         is_cross=os.getenv("COPY_IS_CROSS", "false").lower() == "true",
         poll_interval_seconds=float(os.getenv("COPY_POLL_INTERVAL", "3.0")),
         reconcile_mode=os.getenv("COPY_RECONCILE_MODE", "state").lower(),

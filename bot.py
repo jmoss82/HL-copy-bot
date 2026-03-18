@@ -624,7 +624,11 @@ async def main():
         scaling_detail = "equity-proportional"
     logger.info(f"Scaling:   {cfg.scaling_mode} ({scaling_detail})")
     logger.info(f"Copy mode: {cfg.reconcile_mode}")
-    logger.info(f"Leverage:  {cfg.leverage}x ({'cross' if cfg.is_cross else 'isolated'})")
+    lev_line = f"{cfg.leverage}x ({'cross' if cfg.is_cross else 'isolated'})"
+    if cfg.leverage_overrides:
+        overrides = ", ".join(f"{c}={l}x" for c, l in cfg.leverage_overrides.items())
+        lev_line += f"  overrides: {overrides}"
+    logger.info(f"Leverage:  {lev_line}")
     logger.info(f"Polling:   every {cfg.poll_interval_seconds}s")
     logger.info(f"Slippage:  {cfg.slippage_bps} bps")
     logger.info(f"Dry run:   {cfg.dry_run}")

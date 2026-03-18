@@ -468,10 +468,11 @@ class TradeCopier:
     def _set_leverage(self, coin: str) -> None:
         """Set leverage for a coin. Failures are non-fatal."""
         try:
+            lev = self.config.leverage_for(coin)
             self.exchange.update_leverage(
-                self.config.leverage, coin, is_cross=self.config.is_cross,
+                lev, coin, is_cross=self.config.is_cross,
             )
             mode = "cross" if self.config.is_cross else "isolated"
-            logger.info(f"Leverage set: {coin} {self.config.leverage}x ({mode})")
+            logger.info(f"Leverage set: {coin} {lev}x ({mode})")
         except Exception as e:
             logger.warning(f"Could not set leverage for {coin}: {e} (may already be set)")
