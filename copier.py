@@ -317,7 +317,10 @@ class TradeCopier:
 
         is_buy = signed_delta > 0
         side = "BUY" if is_buy else "SELL"
-        abs_size = abs(signed_delta)
+        abs_size = round(abs(signed_delta), decimals)
+        if abs_size == 0:
+            logger.debug(f"Clipped size rounded to zero for {coin}, skipping")
+            return None
         is_reduce_only = (
             abs(current_size) > 1e-10
             and (current_size > 0) != (signed_delta > 0)
